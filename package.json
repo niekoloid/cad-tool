@@ -1,0 +1,29 @@
+{
+  "name": "web-sxf-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "build:wasm": "emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS='[\"_SXFopen_AP202\", \"_SXFread_table_AP202\", \"_SXFread_assembly_name_AP202\", \"_SXFread_next_feature_AP202\", \"_SXFclose_AP202\", \"_malloc\", \"_free\"]' -s EXPORTED_RUNTIME_METHODS='[\"ccall\", \"cwrap\"]' -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME='createP21Module' -I ./p21/common_lib ./p21/common_lib/*.cpp -o ./public/p21-parser.js",
+    "prebuild": "npm run build:wasm"
+  },
+  "dependencies": {
+    "next": "14.0.0",
+    "react": "^18",
+    "react-dom": "^18",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.0.1",
+    "postcss": "^8",
+    "eslint": "^8",
+    "eslint-config-next": "14.0.0"
+  }
+}
