@@ -1,5 +1,16 @@
 // WebAssembly P21 Parser TypeScript Interface
-import '../types/emscripten';
+
+// Emscripten module interface
+interface EmscriptenModule {
+  _malloc(size: number): number;
+  _free(ptr: number): void;
+  getValue(ptr: number, type: string): number;
+  setValue(ptr: number, value: number, type: string): void;
+  UTF8ToString(ptr: number): string;
+  writeStringToMemory(str: string, ptr: number): void;
+  ccall(name: string, returnType: string, argTypes: string[], args: any[]): any;
+  cwrap(name: string, returnType: string, argTypes: string[]): (...args: any[]) => any;
+}
 
 export interface P21WASMModule extends EmscriptenModule {
   ccall: (name: string, returnType: string, argTypes: string[], args: any[]) => any;
