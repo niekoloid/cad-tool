@@ -1,19 +1,19 @@
 'use client';
 
 import { useCallback, useState, useEffect } from 'react';
-import { SXFDocument } from '@/types/sxf';
 import { CADDocument, FileFormatInfo } from '@/types/p21';
 import { createP21Converter } from '@/lib/p21-converter';
 
-interface FileUploadProps {
+interface GlobalDropHandlerProps {
   onFileLoaded: (document: CADDocument) => void;
+  isActive: boolean; // ファイルが既に読み込まれている時のみアクティブ
 }
 
-export default function FileUpload({ onFileLoaded }: FileUploadProps) {
+export default function GlobalDropHandler({ onFileLoaded, isActive }: GlobalDropHandlerProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [dragCounter, setDragCounter] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [detectedFormat, setDetectedFormat] = useState<FileFormatInfo | null>(null);
 
   const detectFileFormat = useCallback((file: File): FileFormatInfo => {
     const fileName = file.name.toLowerCase();
@@ -134,11 +134,9 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true);
     setError(null);
-    setDetectedFormat(null);
 
     try {
       const formatInfo = detectFileFormat(file);
-      setDetectedFormat(formatInfo);
 
       let document: CADDocument;
       
@@ -156,113 +154,122 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
         setError('ファイルの読み込みに失敗しました');
         console.error('File loading error:', err);
       }
+      
+      // エラー表示後3秒で自動消去
+      setTimeout(() => setError(null), 3000);
     } finally {
       setIsLoading(false);
     }
   }, [onFileLoaded, detectFileFormat, parseP21File, parseSXFFile]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  // グローバルドラッグ&ドロップハンドラー
+  const handleGlobalDragEnter = useCallback((e: DragEvent) => {
+    if (!isActive) return;
+    
+    e.preventDefault();
+    setDragCounter(prev => prev + 1);
+    setIsDragging(true);
+  }, [isActive]);
+
+  const handleGlobalDragLeave = useCallback((e: DragEvent) => {
+    if (!isActive) return;
+    
+    e.preventDefault();
+    setDragCounter(prev => {
+      const newCounter = prev - 1;
+      if (newCounter === 0) {
+        setIsDragging(false);
+      }
+      return newCounter;
+    });
+  }, [isActive]);
+
+  const handleGlobalDragOver = useCallback((e: DragEvent) => {
+    if (!isActive) return;
+    
+    e.preventDefault();
+  }, [isActive]);
+
+  const handleGlobalDrop = useCallback((e: DragEvent) => {
+    if (!isActive) return;
+    
     e.preventDefault();
     setIsDragging(false);
+    setDragCounter(0);
 
-    const files = Array.from(e.dataTransfer.files);
+    const files = Array.from(e.dataTransfer?.files || []);
     if (files.length > 0) {
       handleFile(files[0]);
     }
-  }, [handleFile]);
+  }, [isActive, handleFile]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  }, []);
+  // グローバルドラッグ&ドロップイベントの設定
+  useEffect(() => {
+    if (!isActive) return;
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  }, []);
+    document.addEventListener('dragenter', handleGlobalDragEnter);
+    document.addEventListener('dragleave', handleGlobalDragLeave);
+    document.addEventListener('dragover', handleGlobalDragOver);
+    document.addEventListener('drop', handleGlobalDrop);
 
+    return () => {
+      document.removeEventListener('dragenter', handleGlobalDragEnter);
+      document.removeEventListener('dragleave', handleGlobalDragLeave);
+      document.removeEventListener('dragover', handleGlobalDragOver);
+      document.removeEventListener('drop', handleGlobalDrop);
+    };
+  }, [isActive, handleGlobalDragEnter, handleGlobalDragLeave, handleGlobalDragOver, handleGlobalDrop]);
 
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      handleFile(files[0]);
-    }
-  }, [handleFile]);
+  if (!isActive) return null;
 
   return (
-    <div className="p-8">
-        <div
-          className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-            isDragging
-              ? 'border-blue-400 bg-blue-50'
-              : 'border-gray-300 hover:border-gray-400'
-          }`}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-        >
-        {isLoading ? (
-          <div className="space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="text-gray-600">ファイルを読み込み中...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="mx-auto w-12 h-12 text-gray-400">
-              <svg
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                />
-              </svg>
-            </div>
-            <div>
-              <p className="text-lg font-medium text-gray-900">
-                CADファイルをアップロード
+    <>
+      {/* グローバルドロップオーバーレイ */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-blue-500 bg-opacity-20 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg border-2 border-blue-400 border-dashed">
+            <div className="text-center">
+              <div className="text-4xl mb-4">📁</div>
+              <p className="text-xl font-medium text-blue-600">
+                新しいファイルをドロップしてください
               </p>
-              <p className="text-gray-600">
-                ファイルをドラッグ&ドロップするか、クリックして選択
+              <p className="text-sm text-gray-600 mt-2">
+                SXF (.sxf, .sfc) または STEP Part21 (.p21, .stp, .step)
               </p>
-              {detectedFormat && (
-                <p className="text-sm text-blue-600 mt-1">
-                  検出形式: {detectedFormat.format} ({detectedFormat.extension})
-                </p>
-              )}
             </div>
-            <div>
-              <label htmlFor="file-upload" className="cursor-pointer">
-                <input
-                  id="file-upload"
-                  name="file-upload"
-                  type="file"
-                  accept=".sxf,.sfc,.p21,.stp,.step"
-                  className="sr-only"
-                  onChange={handleFileInput}
-                />
-                <span className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-                  ファイルを選択
-                </span>
-              </label>
-            </div>
-            <p className="text-xs text-gray-500">
-              対応形式: SXF (.sxf, .sfc), STEP Part21 (.p21, .stp, .step) (最大 50MB)
-            </p>
           </div>
-        )}
-      </div>
-      
-      {error && (
-        <div className="mt-4 p-4 border border-red-300 rounded-md bg-red-50">
-          <p className="text-red-800">{error}</p>
         </div>
       )}
-    </div>
+
+      {/* ローディング表示 */}
+      {isLoading && (
+        <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-8 rounded-lg shadow-lg">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">ファイルを読み込み中...</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* エラー表示 */}
+      {error && (
+        <div className="fixed top-4 right-4 z-50 max-w-md">
+          <div className="bg-red-50 border border-red-300 rounded-md p-4 shadow-lg">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm text-red-800">{error}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

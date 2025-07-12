@@ -4,6 +4,7 @@ import { useState } from 'react';
 import FileUpload from '@/components/FileUpload';
 import CADViewer from '@/components/CADViewer';
 import LayerPanel from '@/components/LayerPanel';
+import GlobalDropHandler from '@/components/GlobalDropHandler';
 import { SXFDocument } from '@/types/sxf';
 import { CADDocument } from '@/types/p21';
 
@@ -32,6 +33,12 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-50">
+      {/* グローバルドロップハンドラー */}
+      <GlobalDropHandler 
+        onFileLoaded={handleFileLoaded} 
+        isActive={!!document} 
+      />
+
       {/* Header */}
       <header className="bg-white border-b border-gray-300 px-6 py-4">
         <div className="flex items-center justify-between">
@@ -47,12 +54,17 @@ export default function Home() {
             )}
           </div>
           {document && (
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-            >
-              新しいファイル
-            </button>
+            <div className="flex space-x-2">
+              <p className="text-xs text-gray-500 self-center">
+                画面のどこにでもファイルをドロップできます
+              </p>
+              <button
+                onClick={handleReset}
+                className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+              >
+                新しいファイル
+              </button>
+            </div>
           )}
         </div>
       </header>
