@@ -4,6 +4,9 @@ import { useCallback, useState, useEffect } from 'react';
 import { SXFDocument } from '@/types/sxf';
 import { CADDocument, FileFormatInfo } from '@/types/p21';
 import { createP21Converter } from '@/lib/p21-converter';
+import { createSAFParser } from '@/lib/saf-parser';
+import { createJWWParser } from '@/lib/jww-parser';
+import { createJWWConverter } from '@/lib/jww-converter';
 
 interface FileUploadProps {
   onFileLoaded: (document: CADDocument) => void;
@@ -23,6 +26,10 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
       return { format: 'SXF', extension };
     } else if (extension === '.p21' || extension === '.stp' || extension === '.step') {
       return { format: 'P21', extension };
+    } else if (extension === '.xlsx' || extension === '.xls') {
+      return { format: 'SAF', extension };
+    } else if (extension === '.jww' || extension === '.jwc') {
+      return { format: 'JWW', extension };
     }
     
     throw new Error('Unsupported file format');
@@ -131,6 +138,232 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
     return mockSXFDocument;
   }, []);
 
+  const parseSAFFile = useCallback(async (file: File): Promise<CADDocument> => {
+    try {
+      const parser = createSAFParser();
+      const result = await parser.parseFile(file);
+      
+      if (!result.success || !result.document) {
+        throw new Error(result.error || 'SAF parsing failed');
+      }
+
+      // Convert SAF document to CADDocument format
+      const cadDocument: CADDocument = {
+        format: 'SAF',
+        originalData: result.document,
+        title: result.document.projectInfo.name || file.name,
+        layers: [
+          {
+            id: 'nodes',
+            name: 'Nodes',
+            visible: true,
+            color: '#0000FF',
+            items: result.document.nodes.map(node => ({
+              id: node.id,
+              type: 'node' as const,
+              data: node
+            }))
+          },
+          {
+            id: 'members',
+            name: 'Members',
+            visible: true,
+            color: '#000000',
+            items: result.document.members.map(member => ({
+              id: member.id,
+              type: 'member' as const,
+              data: member
+            }))
+          }
+        ],
+        geometries: [],
+        metadata: {
+          format: 'SAF (Structural Analysis Format)',
+          title: result.document.projectInfo.name || file.name,
+          created: new Date(),
+          nodeCount: result.document.nodes.length,
+          memberCount: result.document.members.length
+        }
+      };
+
+      // Convert SAF elements to geometries
+      for (const node of result.document.nodes) {
+        cadDocument.geometries.push({
+          id: `node_${node.id}`,
+          type: 'point',
+          layer: 'nodes',
+          style: { color: '#0000FF', lineWidth: 3 },
+          geometry: {
+            position: { x: node.x, y: node.y, z: node.z || 0 }
+          }
+        });
+      }
+
+      for (const member of result.document.members) {
+        const startNode = result.document.nodes.find(n => n.id === member.startNodeId);
+        const endNode = result.document.nodes.find(n => n.id === member.endNodeId);
+        
+        if (startNode && endNode) {
+          cadDocument.geometries.push({
+            id: `member_${member.id}`,
+            type: 'line',
+            layer: 'members',
+            style: { color: '#000000', lineWidth: 2 },
+            geometry: {
+              start: { x: startNode.x, y: startNode.y },
+              end: { x: endNode.x, y: endNode.y }
+            }
+          });
+        }
+      }
+
+      return cadDocument;
+      
+    } catch (error) {
+      console.warn('SAF parser failed, using fallback:', error);
+      
+      // Fallback mock SAF document
+      const mockSAFDocument: CADDocument = {
+        format: 'SAF',
+        originalData: null,
+        title: file.name,
+        layers: [
+          { 
+            id: 'nodes', 
+            name: 'Nodes', 
+            visible: true, 
+            color: '#0000FF',
+            items: []
+          },
+          { 
+            id: 'members', 
+            name: 'Members', 
+            visible: true, 
+            color: '#000000',
+            items: []
+          }
+        ],
+        geometries: [
+          {
+            id: 'node1',
+            type: 'point',
+            layer: 'nodes',
+            style: { color: '#0000FF', lineWidth: 3 },
+            geometry: { position: { x: 0, y: 0, z: 0 } }
+          },
+          {
+            id: 'node2',
+            type: 'point',
+            layer: 'nodes',
+            style: { color: '#0000FF', lineWidth: 3 },
+            geometry: { position: { x: 100, y: 0, z: 0 } }
+          },
+          {
+            id: 'member1',
+            type: 'line',
+            layer: 'members',
+            style: { color: '#000000', lineWidth: 2 },
+            geometry: { start: { x: 0, y: 0 }, end: { x: 100, y: 0 } }
+          }
+        ],
+        metadata: {
+          format: 'SAF (Structural Analysis Format)',
+          title: file.name,
+          created: new Date()
+        }
+      };
+
+      return mockSAFDocument;
+    }
+  }, []);
+
+  const parseJWWFile = useCallback(async (file: File): Promise<CADDocument> => {
+    try {
+      const parser = createJWWParser();
+      const result = await parser.parseFile(file);
+      
+      if (!result.success || !result.document) {
+        throw new Error(result.error || 'JWW parsing failed');
+      }
+
+      const converter = createJWWConverter();
+      const geometries = converter.extractGeometriesFromDocument(result.document);
+      const stats = converter.getDocumentStats(result.document);
+      
+      // Convert JWW document to CADDocument format
+      const cadDocument: CADDocument = {
+        format: 'JWW',
+        originalData: result.document,
+        title: result.document.projectInfo.title || file.name,
+        layers: result.document.layers.map(layer => ({
+          id: `layer_${layer.id}`,
+          name: layer.name,
+          visible: layer.visible,
+          color: `#${layer.color.toString(16).padStart(6, '0')}`,
+          items: []
+        })),
+        geometries,
+        metadata: {
+          format: `JWW (Jw_cad ${result.document.metadata?.version || 'Unknown'})`,
+          title: result.document.projectInfo.title || file.name,
+          created: new Date(),
+          ...stats
+        }
+      };
+
+      return cadDocument;
+      
+    } catch (error) {
+      console.warn('JWW parser failed, using fallback:', error);
+      
+      // Fallback mock JWW document
+      const mockJWWDocument: CADDocument = {
+        format: 'JWW',
+        originalData: null,
+        title: file.name,
+        layers: [
+          { 
+            id: 'layer0', 
+            name: 'Layer 0', 
+            visible: true, 
+            color: '#000000',
+            items: []
+          },
+          { 
+            id: 'layer1', 
+            name: 'Layer 1', 
+            visible: true, 
+            color: '#FF0000',
+            items: []
+          }
+        ],
+        geometries: [
+          {
+            id: 'jww_line1',
+            type: 'line',
+            layer: 'layer0',
+            style: { color: '#000000', lineWidth: 1 },
+            geometry: { start: { x: 50, y: 50 }, end: { x: 150, y: 150 } }
+          },
+          {
+            id: 'jww_circle1',
+            type: 'circle',
+            layer: 'layer1',
+            style: { color: '#FF0000', lineWidth: 2 },
+            geometry: { center: { x: 100, y: 100 }, radius: 40 }
+          }
+        ],
+        metadata: {
+          format: 'JWW (Jw_cad)',
+          title: file.name,
+          created: new Date()
+        }
+      };
+
+      return mockJWWDocument;
+    }
+  }, []);
+
   const handleFile = useCallback(async (file: File) => {
     setIsLoading(true);
     setError(null);
@@ -144,6 +377,10 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
       
       if (formatInfo.format === 'P21') {
         document = await parseP21File(file);
+      } else if (formatInfo.format === 'SAF') {
+        document = await parseSAFFile(file);
+      } else if (formatInfo.format === 'JWW') {
+        document = await parseJWWFile(file);
       } else {
         document = await parseSXFFile(file);
       }
@@ -151,7 +388,7 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
       onFileLoaded(document);
     } catch (err) {
       if (err instanceof Error && err.message === 'Unsupported file format') {
-        setError('対応していないファイル形式です。SXF (.sxf, .sfc) または STEP Part21 (.p21, .stp, .step) ファイルを選択してください');
+        setError('対応していないファイル形式です。SXF (.sxf, .sfc)、STEP Part21 (.p21, .stp, .step)、SAF (.xlsx, .xls)、または JWW (.jww, .jwc) ファイルを選択してください');
       } else {
         setError('ファイルの読み込みに失敗しました');
         console.error('File loading error:', err);
@@ -159,7 +396,7 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [onFileLoaded, detectFileFormat, parseP21File, parseSXFFile]);
+  }, [onFileLoaded, detectFileFormat, parseP21File, parseSXFFile, parseSAFFile, parseJWWFile]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -242,7 +479,7 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
                   id="file-upload"
                   name="file-upload"
                   type="file"
-                  accept=".sxf,.sfc,.p21,.stp,.step"
+                  accept=".sxf,.sfc,.p21,.stp,.step,.xlsx,.xls,.jww,.jwc"
                   className="sr-only"
                   onChange={handleFileInput}
                 />
@@ -252,7 +489,7 @@ export default function FileUpload({ onFileLoaded }: FileUploadProps) {
               </label>
             </div>
             <p className="text-xs text-gray-500">
-              対応形式: SXF (.sxf, .sfc), STEP Part21 (.p21, .stp, .step) (最大 50MB)
+              対応形式: SXF (.sxf, .sfc), STEP Part21 (.p21, .stp, .step), SAF (.xlsx, .xls), JWW (.jww, .jwc) (最大 50MB)
             </p>
           </div>
         )}

@@ -45,7 +45,7 @@ export default function Home() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">CAD Web Viewer</h1>
             <p className="text-sm text-gray-600">
-              SXF・STEP Part21対応WebCADビューアー
+              SXF・STEP Part21・SAF・JWW対応WebCADビューアー
             </p>
             {document && (
               <p className="text-xs text-blue-600 mt-1">
@@ -99,7 +99,7 @@ export default function Home() {
       <footer className="bg-white border-t border-gray-300 px-6 py-3">
         <div className="flex items-center justify-between text-sm text-gray-600">
           <div>
-            SXF (Standard Exchange Format) ・ STEP Part21 (ISO 10303-21) 対応CADビューアー
+            SXF (Standard Exchange Format) ・ STEP Part21 (ISO 10303-21) ・ SAF (Structural Analysis Format) ・ JWW (Jw_cad) 対応CADビューアー
           </div>
           <div>
             © 2024 CAD Web Viewer

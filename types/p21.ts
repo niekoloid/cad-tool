@@ -264,14 +264,14 @@ export interface P21Document {
 
 // File format detection
 export interface FileFormatInfo {
-  format: 'SXF' | 'P21';
+  format: 'SXF' | 'P21' | 'SAF' | 'JWW';
   extension: string;
   mimeType?: string;
 }
 
 // Common interface for unified handling
 export interface CADDocument {
-  format: 'SXF' | 'P21';
+  format: 'SXF' | 'P21' | 'SAF' | 'JWW';
   originalData: any; // SXFDocument | P21Document
   
   // Unified properties
@@ -286,7 +286,7 @@ export interface CADLayer {
   name: string;
   visible: boolean;
   color?: string;
-  items: CADGeometry[];
+  items: any[]; // Flexible for different data types
 }
 
 export interface CADGeometry {
@@ -313,4 +313,5 @@ export interface CADMetadata {
   modified?: Date;
   scale?: string;
   units?: string;
+  [key: string]: any; // Allow additional metadata properties
 }
