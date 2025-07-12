@@ -110,7 +110,7 @@ export class P21Converter {
   }
 
   private parseParameters(paramStr: string): any[] {
-    // Simple parameter parser - would need to be more robust for production
+    // Enhanced parameter parser for P21 format
     const params: any[] = [];
     let current = '';
     let depth = 0;
@@ -130,7 +130,10 @@ export class P21Converter {
           depth--;
           current += char;
         } else if (char === ',' && depth === 0) {
-          params.push(this.parseValue(current.trim()));
+          const value = this.parseValue(current.trim());
+          if (value !== undefined) {
+            params.push(value);
+          }
           current = '';
         } else {
           current += char;
@@ -141,7 +144,10 @@ export class P21Converter {
     }
     
     if (current.trim()) {
-      params.push(this.parseValue(current.trim()));
+      const value = this.parseValue(current.trim());
+      if (value !== undefined) {
+        params.push(value);
+      }
     }
     
     return params;
@@ -156,6 +162,19 @@ export class P21Converter {
       return parseInt(value.slice(1)); // Reference
     } else if (value === '$') {
       return null; // Undefined
+    } else if (value.startsWith('(') && value.endsWith(')')) {
+      // Parse coordinate tuple or list
+      const innerContent = value.slice(1, -1);
+      if (innerContent.includes('#')) {
+        // List of references like (#150,#160,#170,#180,#190)
+        return innerContent.split(',').map(ref => {
+          const trimmed = ref.trim();
+          return trimmed.startsWith('#') ? parseInt(trimmed.slice(1)) : trimmed;
+        });
+      } else {
+        // Coordinate values like (10.000000,-30.000000)
+        return innerContent.split(',').map(coord => parseFloat(coord.trim()));
+      }
     } else if (!isNaN(parseFloat(value))) {
       return parseFloat(value); // Number
     } else if (value === '.T.') {
@@ -170,8 +189,33 @@ export class P21Converter {
   private extractGeometriesFromEntities(entities: any[]): any[] {
     const geometries: any[] = [];
     
+    // Create a map of entities by ID for reference resolution
+    const entityMap = new Map();
+    entities.forEach(entity => {
+      entityMap.set(entity.id, entity);
+    });
+    
+    // Only process geometric entities (not individual points that are part of other geometries)
+    const referencedPoints = new Set();
+    
+    // First pass: find all points that are referenced by other geometries
     for (const entity of entities) {
-      const geometry = this.convertEntityToGeometry(entity);
+      if (entity.type === 'POLYLINE' && entity.parameters.length >= 2 && Array.isArray(entity.parameters[1])) {
+        entity.parameters[1].forEach((ref: any) => {
+          if (typeof ref === 'number') {
+            referencedPoints.add(ref);
+          }
+        });
+      }
+    }
+    
+    for (const entity of entities) {
+      // Skip standalone points that are part of polylines
+      if (entity.type === 'CARTESIAN_POINT' && referencedPoints.has(entity.id)) {
+        continue;
+      }
+      
+      const geometry = this.convertEntityToGeometry(entity, entityMap);
       if (geometry) {
         geometries.push(geometry);
       }
@@ -180,31 +224,134 @@ export class P21Converter {
     return geometries;
   }
 
-  private convertEntityToGeometry(entity: any): any | null {
+  private convertEntityToGeometry(entity: any, entityMap: Map<number, any>): any | null {
     switch (entity.type) {
       case 'CARTESIAN_POINT':
-        return {
-          id: `point_${entity.id}`,
-          type: 'point',
-          layer: 'default',
-          geometry: {
-            x: entity.parameters[0] || 0,
-            y: entity.parameters[1] || 0,
-            z: entity.parameters[2] || 0
+        if (entity.parameters.length >= 2 && Array.isArray(entity.parameters[1])) {
+          const coords = entity.parameters[1];
+          return {
+            id: `point_${entity.id}`,
+            type: 'point',
+            layer: 'default',
+            geometry: {
+              x: coords[0] || 0,
+              y: coords[1] || 0,
+              z: coords[2] || 0
+            }
+          };
+        }
+        return null;
+      
+      case 'POLYLINE':
+        if (entity.parameters.length >= 2 && Array.isArray(entity.parameters[1])) {
+          const pointRefs = entity.parameters[1];
+          const points: any[] = [];
+          
+          for (const ref of pointRefs) {
+            if (typeof ref === 'number' && entityMap.has(ref)) {
+              const pointEntity = entityMap.get(ref);
+              if (pointEntity.type === 'CARTESIAN_POINT' && 
+                  pointEntity.parameters.length >= 2 && 
+                  Array.isArray(pointEntity.parameters[1])) {
+                const coords = pointEntity.parameters[1];
+                points.push({
+                  x: coords[0] || 0,
+                  y: coords[1] || 0
+                });
+              }
+            }
           }
-        };
+          
+          if (points.length >= 2) {
+            return {
+              id: `polyline_${entity.id}`,
+              type: 'polyline',
+              layer: 'default',
+              geometry: {
+                points: points
+              }
+            };
+          }
+        }
+        return null;
       
       case 'LINE':
-        // LINE typically references two points
-        return {
-          id: `line_${entity.id}`,
-          type: 'line',
-          layer: 'default',
-          geometry: {
-            start: { x: 0, y: 0 }, // Would need to resolve point references
-            end: { x: 100, y: 100 }
+        // LINE has a point and a vector (VECTOR(direction, magnitude))
+        if (entity.parameters.length >= 2) {
+          const startPointRef = entity.parameters[0];
+          const vectorRef = entity.parameters[1];
+          
+          let startPoint = { x: 0, y: 0 };
+          let endPoint = { x: 100, y: 100 };
+          
+          // Resolve start point
+          if (typeof startPointRef === 'number' && entityMap.has(startPointRef)) {
+            const pointEntity = entityMap.get(startPointRef);
+            if (pointEntity.type === 'CARTESIAN_POINT' && 
+                pointEntity.parameters.length >= 2 && 
+                Array.isArray(pointEntity.parameters[1])) {
+              const coords = pointEntity.parameters[1];
+              startPoint = { x: coords[0] || 0, y: coords[1] || 0 };
+            }
           }
-        };
+          
+          // Try to resolve vector for proper end point calculation
+          if (typeof vectorRef === 'number' && entityMap.has(vectorRef)) {
+            const vectorEntity = entityMap.get(vectorRef);
+            if (vectorEntity.type === 'VECTOR' && vectorEntity.parameters.length >= 2) {
+              const directionRef = vectorEntity.parameters[0];
+              const magnitude = vectorEntity.parameters[1];
+              
+              if (typeof directionRef === 'number' && entityMap.has(directionRef)) {
+                const directionEntity = entityMap.get(directionRef);
+                if (directionEntity.type === 'DIRECTION' && 
+                    directionEntity.parameters.length >= 1 && 
+                    Array.isArray(directionEntity.parameters[0])) {
+                  const direction = directionEntity.parameters[0];
+                  const dx = direction[0] || 0;
+                  const dy = direction[1] || 0;
+                  
+                  endPoint = {
+                    x: startPoint.x + dx * magnitude,
+                    y: startPoint.y + dy * magnitude
+                  };
+                }
+              }
+            }
+          } else {
+            // Fallback - create a horizontal line
+            endPoint = { x: startPoint.x + 100, y: startPoint.y };
+          }
+          
+          return {
+            id: `line_${entity.id}`,
+            type: 'line',
+            layer: 'default',
+            geometry: {
+              start: startPoint,
+              end: endPoint
+            }
+          };
+        }
+        return null;
+      
+      case 'TRIMMED_CURVE':
+        // TRIMMED_CURVE references a base curve and trim parameters
+        if (entity.parameters.length >= 3) {
+          const baseCurveRef = entity.parameters[1];
+          const startTrimRef = entity.parameters[2];
+          const endTrimRef = entity.parameters[3];
+          
+          // Try to resolve the base curve (could be LINE)
+          if (typeof baseCurveRef === 'number' && entityMap.has(baseCurveRef)) {
+            const baseCurve = entityMap.get(baseCurveRef);
+            if (baseCurve.type === 'LINE') {
+              // Extract line geometry
+              return this.convertEntityToGeometry(baseCurve, entityMap);
+            }
+          }
+        }
+        return null;
       
       case 'CIRCLE':
         return {
